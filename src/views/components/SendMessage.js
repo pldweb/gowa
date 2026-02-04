@@ -95,7 +95,6 @@ export default {
                 if (targets.length === 0) {
                     throw new Error("No devices selected to broadcast to.");
                 }
-
                 const payload = {
                     phone: this.phone_id,
                     message: this.text.trim(),
