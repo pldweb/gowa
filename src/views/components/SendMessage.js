@@ -15,7 +15,7 @@ export default {
             mention_everyone: false,
             duration: 0,
             loading: false,
-            send_to_all_devices: false,
+            selected_devices: [],
         }
     },
     computed: {
@@ -40,6 +40,22 @@ export default {
         isGroup() {
             return this.type === window.TYPEGROUP;
         },
+        getConnectedDevices() {
+            return this.$root.connected_devices || this.$root.deviceList || [];
+        },
+        isAllDevicesSelected() {
+            const devices = this.getConnectedDevices();
+            if (devices.length === 0) return false;
+            return devices.every(d => this.selected_devices.includes(d.id || d.device));
+        },
+        toggleAllDevices() {
+            const devices = this.getConnectedDevices();
+            if (this.isAllDevicesSelected()) {
+                this.selected_devices = [];
+            } else {
+                this.selected_devices = devices.map(d => d.id || d.device);
+            }
+        },
         isValidForm() {
             // Validate phone number is not empty except for status type
             const isPhoneValid = this.type === window.TYPESTATUS || this.phone.trim().length > 0;
@@ -55,7 +71,7 @@ export default {
                 return;
             }
 
-            if (this.send_to_all_devices && this.type === window.TYPESTATUS) {
+            if (this.selected_devices.length > 0 && this.type === window.TYPESTATUS) {
                 await this.handleBroadcastSubmit();
                 return;
             }
@@ -71,13 +87,13 @@ export default {
         async handleBroadcastSubmit() {
             this.loading = true;
             try {
-                // Access connected devices from root
-                const devices = this.$root.connected_devices || this.$root.deviceList || [];
-                const targets = devices.filter(d => (d.id || d.device));
+                // Use selected devices only
+                const allDevices = this.$root.connected_devices || this.$root.deviceList || [];
+                const targets = allDevices.filter(d => this.selected_devices.includes(d.id || d.device));
                 console.log("Broadcast targets:", targets);
 
                 if (targets.length === 0) {
-                    throw new Error("No devices found to broadcast to.");
+                    throw new Error("No devices selected to broadcast to.");
                 }
 
                 const payload = {
@@ -157,7 +173,7 @@ export default {
             this.is_forwarded = false;
             this.mention_everyone = false;
             this.duration = 0;
-            this.send_to_all_devices = false;
+            this.selected_devices = [];
         },
     },
     template: `
@@ -181,9 +197,26 @@ export default {
             <form class="ui form">
                 <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true"/>
                 <div class="field" v-if="isShowBroadcastCheckbox()">
-                    <div class="ui checkbox">
-                        <input type="checkbox" v-model="send_to_all_devices">
-                        <label>Send to All Logged-in Devices</label>
+                    <label>Select Devices to Send Status</label>
+                    <div class="ui segment" style="max-height: 200px; overflow-y: auto;">
+                        <div class="ui checkbox" style="display: block; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+                            <input type="checkbox" :checked="isAllDevicesSelected()" @change="toggleAllDevices">
+                            <label style="font-weight: bold;">Select All Devices</label>
+                        </div>
+                        <div v-for="device in getConnectedDevices()" :key="device.id || device.device" class="ui checkbox" style="display: block; margin-bottom: 8px;">
+                            <input type="checkbox" :value="device.id || device.device" v-model="selected_devices">
+                            <label>
+                                <i class="mobile alternate icon"></i>
+                                {{ device.name || device.pushname || device.id || device.device }}
+                                <span class="ui mini label" :class="device.state === 'logged_in' ? 'green' : 'grey'">{{ device.state }}</span>
+                            </label>
+                        </div>
+                        <div v-if="getConnectedDevices().length === 0" class="ui message">
+                            <p>No devices connected. Please connect a device first.</p>
+                        </div>
+                    </div>
+                    <div v-if="selected_devices.length > 0" class="ui mini label blue" style="margin-top: 8px;">
+                        {{ selected_devices.length }} device(s) selected
                     </div>
                 </div>
                 <div class="field" v-if="isShowReplyId()">
