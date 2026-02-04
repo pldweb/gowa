@@ -17,7 +17,9 @@ export default {
             image_url: null,
             preview_url: null,
             is_forwarded: false,
-            duration: 0
+            is_forwarded: false,
+            duration: 0,
+            send_to_all_devices: false
         }
     },
     computed: {
@@ -45,6 +47,9 @@ export default {
         isShowAttributes() {
             return this.type !== window.TYPESTATUS;
         },
+        isShowBroadcastCheckbox() {
+            return this.type === window.TYPESTATUS;
+        },
         isValidForm() {
             if (this.type !== window.TYPESTATUS && !this.phone.trim()) {
                 return false;
@@ -61,12 +66,76 @@ export default {
                 return;
             }
 
+            if (this.send_to_all_devices && this.type === window.TYPESTATUS) {
+                await this.handleBroadcastSubmit();
+                return;
+            }
+
             try {
                 let response = await this.submitApi()
                 showSuccessInfo(response)
                 $('#modalSendImage').modal('hide');
             } catch (err) {
                 showErrorInfo(err)
+            }
+        },
+        async handleBroadcastSubmit() {
+            this.loading = true;
+            try {
+                const devices = this.$root.connected_devices || this.$root.deviceList || [];
+                const targets = devices.filter(d => (d.id || d.device));
+                console.log("Broadcast targets:", targets);
+
+                if (targets.length === 0) {
+                    throw new Error("No devices found to broadcast to.");
+                }
+
+                const fileInput = $("#file_image");
+                const file = (fileInput.length > 0 && fileInput[0].files.length > 0) ? fileInput[0].files[0] : null;
+
+                const promises = targets.map(device => {
+                    const deviceId = device.id || device.device;
+
+                    let payload = new FormData();
+                    payload.append("phone", this.phone_id);
+                    payload.append("view_once", this.view_once);
+                    payload.append("compress", this.compress);
+                    payload.append("caption", this.caption);
+                    payload.append("is_forwarded", this.is_forwarded);
+                    if (this.duration && this.duration > 0) {
+                        payload.append("duration", this.duration);
+                    }
+                    if (file) {
+                        payload.append('image', file);
+                    }
+                    if (this.image_url) {
+                        payload.append('image_url', this.image_url);
+                    }
+
+                    return window.http.post(`/send/image`, payload, {
+                        headers: { 'X-Device-Id': deviceId }
+                    }).then(() => ({ status: 'fulfilled', id: deviceId }))
+                        .catch(err => ({ status: 'rejected', id: deviceId, error: err }));
+                });
+
+                const results = await Promise.all(promises);
+                const success = results.filter(r => r.status === 'fulfilled');
+                const failed = results.filter(r => r.status === 'rejected');
+
+                if (success.length > 0) {
+                    showSuccessInfo(`Success sent to ${success.length} devices.`);
+                }
+                if (failed.length > 0) {
+                    showErrorInfo(`Failed to send to ${failed.length} devices.`);
+                    console.error("Broadcast errors:", failed);
+                }
+
+                this.handleReset();
+                $('#modalSendImage').modal('hide');
+            } catch (err) {
+                showErrorInfo(err.message || err);
+            } finally {
+                this.loading = false;
             }
         },
         async submitApi() {
@@ -81,7 +150,7 @@ export default {
                 if (this.duration && this.duration > 0) {
                     payload.append("duration", this.duration)
                 }
-                
+
                 const fileInput = $("#file_image");
                 if (fileInput.length > 0 && fileInput[0].files.length > 0) {
                     const file = fileInput[0].files[0];
@@ -90,7 +159,7 @@ export default {
                 if (this.image_url) {
                     payload.append('image_url', this.image_url)
                 }
-                
+
                 let response = await window.http.post(`/send/image`, payload)
                 this.handleReset();
                 return response.data.message;
@@ -113,6 +182,7 @@ export default {
             this.image_url = null;
             this.is_forwarded = false;
             this.duration = 0;
+            this.send_to_all_devices = false;
             $("#file_image").val('');
         },
         handleImageChange(event) {
@@ -152,6 +222,12 @@ export default {
         <div class="content" style="max-height: 70vh; overflow-y: auto;">
             <form class="ui form">
                 <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true"/>
+                <div class="field" v-if="isShowBroadcastCheckbox()">
+                    <div class="ui checkbox">
+                        <input type="checkbox" v-model="send_to_all_devices">
+                        <label>Send to All Logged-in Devices</label>
+                    </div>
+                </div>
                 
                 <div class="field">
                     <label>Caption</label>

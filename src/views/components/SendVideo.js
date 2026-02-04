@@ -22,7 +22,8 @@ export default {
             video_url: null,
             selectedFileName: null,
             is_forwarded: false,
-            duration: 0
+            duration: 0,
+            send_to_all_devices: false
         }
     },
     computed: {
@@ -49,6 +50,9 @@ export default {
         },
         isShowAttributes() {
             return this.type !== window.TYPESTATUS;
+        },
+        isShowBroadcastCheckbox() {
+            return this.type === window.TYPESTATUS;
         },
         isValidForm() {
             let isValid = true;
@@ -78,12 +82,76 @@ export default {
                 return;
             }
 
+            if (this.send_to_all_devices && this.type === window.TYPESTATUS) {
+                await this.handleBroadcastSubmit();
+                return;
+            }
+
             try {
                 let response = await this.submitApi()
                 showSuccessInfo(response)
                 $('#modalSendVideo').modal('hide');
             } catch (err) {
                 showErrorInfo(err)
+            }
+        },
+        async handleBroadcastSubmit() {
+            this.loading = true;
+            try {
+                const devices = this.$root.connected_devices || this.$root.deviceList || [];
+                const targets = devices.filter(d => (d.id || d.device));
+                console.log("Broadcast video targets:", targets);
+
+                if (targets.length === 0) {
+                    throw new Error("No devices found to broadcast to.");
+                }
+
+                const fileInput = $("#file_video");
+                const file = (fileInput.length > 0 && fileInput[0].files.length > 0) ? fileInput[0].files[0] : null;
+
+                const promises = targets.map(device => {
+                    const deviceId = device.id || device.device;
+
+                    let payload = new FormData();
+                    payload.append("phone", this.phone_id);
+                    payload.append("caption", this.caption.trim());
+                    payload.append("view_once", this.view_once);
+                    payload.append("compress", this.compress);
+                    payload.append("is_forwarded", this.is_forwarded);
+                    if (this.duration && this.duration > 0) {
+                        payload.append("duration", this.duration);
+                    }
+                    if (file) {
+                        payload.append('video', file);
+                    }
+                    if (this.video_url) {
+                        payload.append('video_url', this.video_url);
+                    }
+
+                    return window.http.post(`/send/video`, payload, {
+                        headers: { 'X-Device-Id': deviceId }
+                    }).then(() => ({ status: 'fulfilled', id: deviceId }))
+                        .catch(err => ({ status: 'rejected', id: deviceId, error: err }));
+                });
+
+                const results = await Promise.all(promises);
+                const success = results.filter(r => r.status === 'fulfilled');
+                const failed = results.filter(r => r.status === 'rejected');
+
+                if (success.length > 0) {
+                    showSuccessInfo(`Success sent to ${success.length} devices.`);
+                }
+                if (failed.length > 0) {
+                    showErrorInfo(`Failed to send to ${failed.length} devices.`);
+                    console.error("Broadcast errors:", failed);
+                }
+
+                this.handleReset();
+                $('#modalSendVideo').modal('hide');
+            } catch (err) {
+                showErrorInfo(err.message || err);
+            } finally {
+                this.loading = false;
             }
         },
         async submitApi() {
@@ -128,6 +196,7 @@ export default {
             this.video_url = null;
             this.is_forwarded = false;
             this.duration = 0;
+            this.send_to_all_devices = false;
             $("#file_video").val('');
         },
         handleFileChange(event) {
@@ -160,6 +229,12 @@ export default {
         <div class="content">
             <form class="ui form">
                 <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true"/>
+                <div class="field" v-if="isShowBroadcastCheckbox()">
+                    <div class="ui checkbox">
+                        <input type="checkbox" v-model="send_to_all_devices">
+                        <label>Send to All Logged-in Devices</label>
+                    </div>
+                </div>
                 
                 <div class="field">
                     <label>Caption</label>

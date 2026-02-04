@@ -15,6 +15,7 @@ export default {
             mention_everyone: false,
             duration: 0,
             loading: false,
+            send_to_all_devices: false,
         }
     },
     computed: {
@@ -33,13 +34,16 @@ export default {
         isShowReplyId() {
             return this.type !== window.TYPESTATUS;
         },
+        isShowBroadcastCheckbox() {
+            return this.type === window.TYPESTATUS;
+        },
         isGroup() {
             return this.type === window.TYPEGROUP;
         },
         isValidForm() {
             // Validate phone number is not empty except for status type
             const isPhoneValid = this.type === window.TYPESTATUS || this.phone.trim().length > 0;
-            
+
             // Validate message is not empty and has reasonable length
             const isMessageValid = this.text.trim().length > 0 && this.text.length <= 4096;
 
@@ -50,12 +54,67 @@ export default {
             if (!this.isValidForm() || this.loading) {
                 return;
             }
+
+            if (this.send_to_all_devices && this.type === window.TYPESTATUS) {
+                await this.handleBroadcastSubmit();
+                return;
+            }
+
             try {
                 const response = await this.submitApi();
                 showSuccessInfo(response);
                 $('#modalSendMessage').modal('hide');
             } catch (err) {
                 showErrorInfo(err);
+            }
+        },
+        async handleBroadcastSubmit() {
+            this.loading = true;
+            try {
+                // Access connected devices from root
+                const devices = this.$root.connected_devices || this.$root.deviceList || [];
+                const targets = devices.filter(d => (d.id || d.device));
+                console.log("Broadcast targets:", targets);
+
+                if (targets.length === 0) {
+                    throw new Error("No devices found to broadcast to.");
+                }
+
+                const payload = {
+                    phone: this.phone_id,
+                    message: this.text.trim(),
+                    is_forwarded: this.is_forwarded
+                };
+                if (this.duration && this.duration > 0) {
+                    payload.duration = this.duration;
+                }
+
+                const promises = targets.map(device => {
+                    const deviceId = device.id || device.device;
+                    return window.http.post('/send/message', payload, {
+                        headers: { 'X-Device-Id': deviceId }
+                    }).then(() => ({ status: 'fulfilled', id: deviceId }))
+                        .catch(err => ({ status: 'rejected', id: deviceId, error: err }));
+                });
+
+                const results = await Promise.all(promises);
+                const success = results.filter(r => r.status === 'fulfilled');
+                const failed = results.filter(r => r.status === 'rejected');
+
+                if (success.length > 0) {
+                    showSuccessInfo(`Success sent to ${success.length} devices.`);
+                }
+                if (failed.length > 0) {
+                    showErrorInfo(`Failed to send to ${failed.length} devices.`);
+                    console.error("Broadcast errors:", failed);
+                }
+
+                this.handleReset();
+                $('#modalSendMessage').modal('hide');
+            } catch (err) {
+                showErrorInfo(err.message || err);
+            } finally {
+                this.loading = false;
             }
         },
         async submitApi() {
@@ -98,6 +157,7 @@ export default {
             this.is_forwarded = false;
             this.mention_everyone = false;
             this.duration = 0;
+            this.send_to_all_devices = false;
         },
     },
     template: `
@@ -120,6 +180,12 @@ export default {
         <div class="content">
             <form class="ui form">
                 <FormRecipient v-model:type="type" v-model:phone="phone" :show-status="true"/>
+                <div class="field" v-if="isShowBroadcastCheckbox()">
+                    <div class="ui checkbox">
+                        <input type="checkbox" v-model="send_to_all_devices">
+                        <label>Send to All Logged-in Devices</label>
+                    </div>
+                </div>
                 <div class="field" v-if="isShowReplyId()">
                     <label>Reply Message ID</label>
                     <input v-model="reply_message_id" type="text"
