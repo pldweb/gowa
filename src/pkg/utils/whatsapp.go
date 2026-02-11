@@ -609,6 +609,11 @@ func SanitizePhone(phone *string) {
 
 // IsOnWhatsapp checks if a number is registered on WhatsApp
 func IsOnWhatsapp(client *whatsmeow.Client, jid string) bool {
+	// Skip validation for special broadcast addresses (status/stories)
+	if jid == "status@broadcast" || strings.HasSuffix(jid, "@broadcast") {
+		return true
+	}
+
 	// only check if the jid is a user with @s.whatsapp.net
 	if strings.Contains(jid, "@s.whatsapp.net") {
 		// Extract phone number from JID and add + prefix for international format

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
@@ -41,6 +42,16 @@ func validateDuration(dur *int) error {
 func validatePhoneNumber(phone string) error {
 	if phone == "" {
 		return pkgError.ValidationError("phone number cannot be empty")
+	}
+
+	// Allow special broadcast addresses for stories/status
+	if phone == "status@broadcast" || strings.HasSuffix(phone, "@broadcast") {
+		return nil
+	}
+
+	// Allow group JIDs
+	if strings.Contains(phone, "@g.us") {
+		return nil
 	}
 
 	// Remove + prefix if present for validation
